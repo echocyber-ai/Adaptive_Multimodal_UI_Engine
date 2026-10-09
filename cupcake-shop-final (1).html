@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lab 3: Adaptive Multimodal UI Engine (Speech, Gesture, Mouse, Touch, Keyboard) – Sugar &amp; Crumb</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* ---- Adaptive variables (changed by modality) ---- */
+      --btn-padding: 10px 20px;
+      --btn-font-size: 0.95rem;
+      --focus-ring: transparent;
+
+      /* ---- Theme variables (changed by cursor zone) ---- */
+      --bg: #fff5f8;
+      --bg-2: #ffffff;
+      --accent: #f4a6bd;
+      --accent-deep: #d86a8d;
+      --ink: #5a2d3c;
+      --card: #ffffff;
+
+      /* ---- Cursor-driven variables ---- */
+      --mx: 50%;
+      --my: 30%;
+      --glow: 240px;
+    }
+
+    /* ===== Adaptive Rule: touch ===== */
+    body.mode-touch { --btn-padding: 18px 34px; --btn-font-size: 1.2rem; }
+
+    /* ===== Adaptive Rule: keyboard ===== */
+    body.mode-keyboard { --focus-ring: 4px solid #ff9900; }
+
+    /* ===== Adaptive Rule: voice (large, calm, pulsing mic) ===== */
+    body.mode-voice { --btn-font-size: 1.05rem; }
+
+    /* ===== Cursor-zone themes ===== */
+    body[data-zone="left"]   { --bg: #fff5f8; --bg-2: #ffffff; --accent: #f4a6bd; --accent-deep: #d86a8d; }
+    body[data-zone="middle"] { --bg: #ffffff; --bg-2: #ffeef3; --accent: #f8bfd0; --accent-deep: #c9557a; }
+    body[data-zone="right"]  { --bg: #ffe9f0; --bg-2: #fff9fb; --accent: #ee8fae; --accent-deep: #b8436a; }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'Nunito', Arial, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle var(--glow) at var(--mx) var(--my), rgba(244,166,189,0.38), transparent 70%),
+        linear-gradient(160deg, var(--bg) 0%, var(--bg-2) 100%);
+      background-attachment: fixed;
+      overflow-x: hidden;
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      padding: 28px clamp(16px, 5vw, 64px) 64px;
+    }
+
+    /* ---------- Floating sprinkles (parallax layer) ---------- */
+    #floaters { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+    .floater {
+      position: absolute;
+      border-radius: 6px;
+      opacity: 0.55;
+      transition: transform 0.35s ease-out;
+    }
+
+    /* ---------- Header ---------- */
+    header {
+      display: flex; flex-wrap: wrap; align-items: center;
+      justify-content: space-between; gap: 12px; margin-bottom: 36px;
+    }
+    .brand {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 1.9rem; font-weight: 600;
+      color: var(--accent-deep); transition: color 0.5s ease;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 16px;
+      background: var(--accent-deep); color: #fff;
+      border-radius: 999px; font-weight: 700; font-size: 0.85rem;
+      transition: background 0.5s ease;
+    }
+    body.mode-voice .badge::before {
+      content: ""; width: 10px; height: 10px; border-radius: 50%;
+      background: #fff; animation: blink 1s infinite;
+    }
+    @keyframes blink { 50% { opacity: 0.25; } }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 32px;
+      align-items: center; max-width: 1050px; margin: 0 auto 48px;
+    }
+    @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
+
+    h1 {
+      font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 600;
+      font-size: clamp(2.4rem, 6vw, 4rem); line-height: 1.05; margin: 0 0 18px;
+    }
+    h1 em { color: var(--accent-deep); font-style: italic; transition: color 0.5s ease; }
+
+    .speech {
+      position: relative; background: var(--card);
+      border: 2px solid var(--accent); border-radius: 22px;
+      padding: 18px 22px; font-size: 1.15rem; font-weight: 600;
+      min-height: 64px; margin-bottom: 8px;
+      box-shadow: 0 10px 30px rgba(216,106,141,0.15);
+      transition: border-color 0.5s ease, box-shadow 0.3s ease;
+    }
+    .speech.talking { box-shadow: 0 0 0 5px rgba(244,166,189,0.45), 0 10px 30px rgba(216,106,141,0.2); }
+    .speech::after {
+      content: ""; position: absolute; left: 34px; bottom: -12px;
+      width: 20px; height: 20px; background: var(--card);
+      border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
+      transform: rotate(45deg); transition: border-color 0.5s ease;
+    }
+    .speech span { display: inline-block; animation: pop 0.35s ease; }
+    @keyframes pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    .hint { font-size: 0.85rem; opacity: 0.75; margin: 20px 0 22px 6px; line-height: 1.5; }
+    kbd {
+      font-family: inherit; font-weight: 700; font-size: 0.8rem;
+      background: #fff; border: 1.5px solid var(--accent);
+      border-radius: 6px; padding: 1px 7px;
+    }
+
+    /* ---------- Search + voice controls ---------- */
+    .search-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .search-input {
+      flex: 1 1 220px; padding: var(--btn-padding); font-size: var(--btn-font-size);
+      font-family: inherit; color: var(--ink); background: #fff;
+      border: 2px solid var(--accent); border-radius: 999px;
+      outline: var(--focus-ring); outline-offset: 3px; transition: all 0.2s ease;
+    }
+    .search-input::placeholder { color: #c99aab; }
+
+    .nav-button {
+      padding: var(--btn-padding); font-size: var(--btn-font-size);
+      font-family: inherit; font-weight: 700;
+      background-color: var(--accent-deep); color: white;
+      border: none; border-radius: 999px; cursor: pointer;
+      outline: var(--focus-ring); outline-offset: 3px;
+      transform: translate(var(--bx, 0px), var(--by, 0px));   /* magnetic pull */
+      transition: transform 0.2s ease-out, filter 0.2s ease, background-color 0.5s ease;
+    }
+    .nav-button:hover { filter: brightness(1.1); }
+
+    .mic-button {
+      position: relative;
+      width: calc(var(--btn-font-size) * 3); height: calc(var(--btn-font-size) * 3);
+      min-width: 46px; min-height: 46px;
+      font-size: calc(var(--btn-font-size) * 1.3);
+      background: #fff; border: 2px solid var(--accent-deep);
+      border-radius: 50%; cursor: pointer;
+      outline: var(--focus-ring); outline-offset: 3px;
+      transform: translate(var(--bx, 0px), var(--by, 0px));
+      transition: transform 0.2s ease-out, background 0.3s ease;
+    }
+    .mic-button.live { background: var(--accent-deep); animation: ring 1.3s infinite; }
+    @keyframes ring {
+      0%   { box-shadow: 0 0 0 0 rgba(216,106,141,0.55); }
+      100% { box-shadow: 0 0 0 22px rgba(216,106,141,0); }
+    }
+    .mic-button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .toggle-row { margin-top: 14px; }
+    .toggle {
+      font-family: inherit; font-weight: 700; font-size: 0.9rem;
+      color: var(--accent-deep); background: #fff;
+      border: 2px solid var(--accent); border-radius: 999px;
+      padding: 8px 16px; cursor: pointer;
+      outline: var(--focus-ring); outline-offset: 3px;
+      transition: all 0.2s ease;
+    }
+    .toggle[aria-pressed="true"] { background: var(--accent-deep); color: #fff; border-color: var(--accent-deep); }
+
+    /* ---------- Hero cupcake ---------- */
+    .hero-art { display: grid; place-items: center; }
+    .hero-art.talking { animation: talk 0.45s ease-in-out infinite alternate; }
+    @keyframes talk { from { transform: translateY(0) scale(1); } to { transform: translateY(-8px) scale(1.03); } }
+    .hero-cupcake {
+      width: min(320px, 70vw);
+      transform: translate(var(--px, 0px), var(--py, 0px)) rotate(var(--rot, 0deg));
+      transition: transform 0.25s ease-out;
+      filter: drop-shadow(0 18px 24px rgba(216,106,141,0.25));
+    }
+
+    /* ---------- Lab 1: Speech & Gesture stage ---------- */
+    .stage-section { max-width: 1050px; margin: 0 auto 48px; }
+    .stage-hint { margin: 0 0 14px; font-size: 0.9rem; opacity: 0.8; line-height: 1.55; }
+    #stage {
+      position: relative; width: 100%; height: 340px; overflow: hidden;
+      background: rgba(255,255,255,0.85);
+      border: 2px dashed var(--accent); border-radius: 24px;
+      transition: border-color 0.5s ease;
+    }
+    .stage-cupcake {
+      position: absolute; left: 0; top: 0; width: 120px; height: 120px;
+      cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+      border-radius: 24px; will-change: transform;
+      outline: var(--focus-ring); outline-offset: 6px;
+    }
+    .stage-cupcake.grabbing { cursor: grabbing; }
+    .stage-cupcake svg {
+      width: 100%; height: 100%; pointer-events: none;
+      transform: scale(var(--s, 1)); transition: transform 0.3s ease, filter 0.2s ease;
+      filter: drop-shadow(0 12px 14px rgba(216,106,141,0.3));
+    }
+    .stage-cupcake.grabbing svg { filter: drop-shadow(0 24px 20px rgba(216,106,141,0.35)); }
+    .stage-cupcake svg.spin { animation: spin 0.8s ease-in-out; }
+    @keyframes spin { to { rotate: 360deg; } }
+    .stage-status { margin-top: 12px; text-align: center; font-weight: 600; min-height: 1.5em; }
+    .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 12px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: inherit; font-weight: 700;
+      font-size: max(0.85rem, calc(var(--btn-font-size) * 0.9));
+      color: var(--ink); background: #fff;
+      border: 2px solid var(--accent); border-radius: 999px;
+      padding: 8px 14px; cursor: pointer;
+      outline: var(--focus-ring); outline-offset: 3px;
+      transition: background 0.2s ease;
+    }
+    .chip:hover { background: var(--accent); }
+    .chip i {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--c); border: 1px solid rgba(0,0,0,0.15); display: inline-block;
+    }
+
+    /* ---------- Decorate toolbar + option panels ---------- */
+    .toolbar { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 14px; }
+    .tool {
+      font-family: inherit; font-weight: 700;
+      font-size: var(--btn-font-size);
+      color: var(--accent-deep); background: #fff;
+      border: 2px solid var(--accent-deep); border-radius: 999px;
+      padding: var(--btn-padding); cursor: pointer;
+      outline: var(--focus-ring); outline-offset: 3px;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+    .tool:hover { background: var(--accent); color: #fff; }
+    .tool[aria-expanded="true"] { background: var(--accent-deep); color: #fff; }
+    .panel {
+      display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px;
+      margin-top: 12px; padding: 16px;
+      background: rgba(255,255,255,0.85);
+      border: 1.5px solid var(--accent); border-radius: 18px;
+      animation: pop 0.25s ease;
+    }
+    .panel[hidden] { display: none; }
+    .panel-label { flex-basis: 100%; text-align: center; font-size: 0.85rem; font-weight: 700; opacity: 0.75; }
+    .chip[aria-pressed="true"] { background: var(--accent-deep); color: #fff; border-color: var(--accent-deep); }
+    .size-readout { font-weight: 700; min-width: 56px; text-align: center; }
+
+    /* ---------- Voice panel (live transcript + conversation log) ---------- */
+    .voice-panel {
+      margin-top: 16px; padding: 12px 14px;
+      background: rgba(255,255,255,0.9);
+      border: 1.5px solid var(--accent); border-radius: 18px;
+    }
+    .voice-live { font-weight: 700; font-size: 0.9rem; color: var(--accent-deep); line-height: 1.4; }
+    .voice-log { margin-top: 8px; max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+    .voice-log:empty { display: none; }
+    .log-line { max-width: 92%; padding: 6px 12px; border-radius: 14px; font-size: 0.9rem; line-height: 1.35; }
+    .log-line.you  { align-self: flex-end;  background: var(--accent); color: var(--ink); }
+    .log-line.shop { align-self: flex-start; background: #fff; border: 1.5px solid var(--accent); }
+
+    /* ---------- Menu ---------- */
+    .menu-title {
+      max-width: 1050px; margin: 0 auto 18px;
+      font-family: 'Cormorant Garamond', Georgia, serif; font-size: 2rem; font-weight: 600;
+    }
+    .menu {
+      max-width: 1050px; margin: 0 auto; display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 20px;
+    }
+    .card {
+      background: var(--card); border: 1.5px solid var(--accent);
+      border-radius: 20px; padding: 18px 16px 20px; text-align: center;
+      outline: var(--focus-ring); outline-offset: 3px;
+      transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.5s ease;
+      transform: perspective(700px) rotateX(var(--tx, 0deg)) rotateY(var(--ty, 0deg));
+      /* spotlight that follows the cursor inside the card */
+      background-image: radial-gradient(circle 110px at var(--cx, 50%) var(--cy, 50%), rgba(248,191,208,0.45), transparent 70%);
+    }
+    .card:hover { box-shadow: 0 14px 30px rgba(216,106,141,0.22); }
+    .card svg { width: 96px; height: 96px; }
+    .card h3 { margin: 6px 0 2px; font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; }
+    .card p { margin: 0; font-size: 0.85rem; opacity: 0.75; }
+    .price { display: inline-block; margin-top: 10px; font-weight: 700; color: var(--accent-deep); }
+    .card.hidden { display: none; }
+    .empty { grid-column: 1 / -1; text-align: center; padding: 30px; opacity: 0.8; }
+
+    /* ---------- Custom cursor ring ---------- */
+    #cursorRing {
+      position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none;
+      width: 36px; height: 36px; margin: -18px 0 0 -18px;
+      border: 2px solid var(--accent-deep); border-radius: 50%;
+      opacity: 0; transition: opacity 0.3s ease, width 0.2s ease, height 0.2s ease,
+                              margin 0.2s ease, background 0.2s ease;
+    }
+    body.mode-mouse #cursorRing.active { opacity: 0.9; }
+    #cursorRing.big   { width: 64px; height: 64px; margin: -32px 0 0 -32px; background: rgba(244,166,189,0.25); }
+    #cursorRing.press { width: 22px; height: 22px; margin: -11px 0 0 -11px; background: rgba(216,106,141,0.4); }
+
+    /* ---------- Sparkle trail + click burst ---------- */
+    .spark {
+      position: fixed; z-index: 40; pointer-events: none; line-height: 1;
+      animation: sparkle 0.95s ease-out forwards;
+    }
+    @keyframes sparkle {
+      from { opacity: 0.95; transform: translate(0, 0) scale(1); }
+      to   { opacity: 0; transform: translate(var(--dx), -40px) scale(0.3) rotate(80deg); }
+    }
+    .bit {
+      position: fixed; z-index: 40; pointer-events: none;
+      width: 12px; height: 5px; border-radius: 3px;
+      animation: burst 0.75s ease-out forwards;
+    }
+    @keyframes burst {
+      from { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+      to   { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+      .spark, .bit, #floaters { display: none; }
+    }
+  </style>
+</head>
+<body class="mode-mouse" data-zone="left">
+
+  <div id="floaters" aria-hidden="true"></div>
+  <div id="cursorRing" aria-hidden="true"></div>
+
+  <main class="page">
+    <header>
+      <div class="brand">Sugar &amp; Crumb</div>
+      <div class="badge" id="modalityBadge">Active Modality: Mouse (Fine Pointer)</div>
+    </header>
+
+    <section class="hero">
+      <div>
+        <h1>Small cakes,<br>big <em>smiles.</em></h1>
+
+        <div class="speech" id="speech" aria-live="polite"><span>Welcome to Sugar &amp; Crumb 🧁</span></div>
+        <p class="hint">
+          Click anywhere for the next message. Tap 🎤 or press <kbd>M</kbd> to talk,
+          then try saying “search strawberry”, “read the menu” or “show all”.
+        </p>
+
+        <div class="search-row">
+          <input id="searchInput" class="search-input" type="text"
+                 placeholder="Type or speak a flavour, e.g. strawberry" aria-label="Search cupcakes">
+          <button id="searchBtn" class="nav-button">Search</button>
+          <button id="micBtn" class="mic-button" aria-label="Speak your search" title="Speak your search (M)">🎤</button>
+        </div>
+
+        <div class="toggle-row">
+          <button id="voiceToggle" class="toggle" aria-pressed="false">🔈 Voice replies: Off</button>
+        </div>
+
+        <div class="voice-panel" id="voicePanel">
+          <div class="voice-live" id="voiceLive" aria-live="polite">🎤 Mic is off. Tap the mic or press M to start talking.</div>
+          <div class="voice-log" id="voiceLog"></div>
+        </div>
+      </div>
+
+      <div class="hero-art" id="heroArt">
+        <svg class="hero-cupcake" id="heroCupcake" viewBox="0 0 120 120" aria-hidden="true" style="--frost:#f7b6c9;">
+          <use href="#cupcake"/>
+        </svg>
+      </div>
+    </section>
+
+    <section class="stage-section">
+      <h2 class="menu-title">Customize Your Cupcake</h2>
+      <p class="stage-hint">
+        Gestures: drag it, flick it to throw it, double-click for sprinkles, or scroll over it to resize.
+        Voice: tap 🎤 and say “lemon frosting”, “chocolate base”, “cherry”, “sprinkles”, “hearts”, “pearls”, “stars”,
+        “bigger”, “spin” or “reset”. Keyboard: Tab to the cupcake, then arrow keys to move and + / − to resize.
+      </p>
+      <div id="stage">
+        <div id="stageCupcake" class="stage-cupcake" tabindex="0" role="group" aria-label="Draggable cupcake">
+          <svg id="stageSvg" viewBox="0 0 120 120" aria-hidden="true" style="--frost:#f7b6c9; --base:#ffffff;">
+            <path d="M26 62 H94 L86 108 Q85 112 80 112 H40 Q35 112 34 108 Z" fill="var(--base)" stroke="#f0a5bc" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M44 66 L46 110 M60 66 V111 M76 66 L74 110" stroke="#d86a8d" stroke-opacity="0.28" stroke-width="3" stroke-linecap="round"/>
+            <path d="M22 64 Q20 46 38 44 Q36 28 54 28 Q60 14 74 26 Q92 26 88 44 Q102 48 98 64 Q60 72 22 64 Z" fill="var(--frost)" stroke="#e58aa6" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M38 52 Q60 60 84 50" stroke="#fff" stroke-opacity="0.65" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <g id="topChips" style="display:none"></g>
+            <g id="topSprinkles" style="display:none"></g>
+            <g id="topHearts" style="display:none"></g>
+            <g id="topPearls" style="display:none"></g>
+            <g id="topStars" style="display:none"></g>
+            <g id="topCherry" style="display:none">
+              <path d="M62 20 Q64 10 72 6" stroke="#5f8a3a" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+              <circle cx="62" cy="21" r="7.5" fill="#d84a73" stroke="#a82f55" stroke-width="2"/>
+              <circle cx="60" cy="19" r="2" fill="#fff" fill-opacity="0.85"/>
+            </g>
+          </svg>
+        </div>
+      </div>
+      <div class="stage-status" id="stageStatus" aria-live="polite">Voice control offline. Tap 🎤 to activate.</div>
+      <div id="controls">
+        <div class="toolbar">
+          <button class="tool" data-panel="panelBase" aria-expanded="false" aria-controls="panelBase">🎂 Base / Flavor</button>
+          <button class="tool" data-panel="panelTop" aria-expanded="false" aria-controls="panelTop">🍒 Toppings</button>
+          <button class="tool" data-panel="panelFrost" aria-expanded="false" aria-controls="panelFrost">🧁 Frosting</button>
+          <button class="tool" data-panel="panelSize" aria-expanded="false" aria-controls="panelSize">📏 Size</button>
+          <button class="tool" data-act="spin">🌀 Spin</button>
+          <button class="tool" data-act="reset">↺ Reset</button>
+        </div>
+
+        <div class="panel" id="panelBase" hidden><span class="panel-label">Choose the cupcake base flavour</span></div>
+
+        <div class="panel" id="panelTop" hidden>
+          <span class="panel-label">Tap to add or remove a topping</span>
+          <button class="chip" data-top="chips" aria-pressed="false">🍫 Choco chips</button>
+          <button class="chip" data-top="sprinkles" aria-pressed="false">🌈 Sprinkles</button>
+          <button class="chip" data-top="cherry" aria-pressed="false">🍒 Cherry</button>
+          <button class="chip" data-top="hearts" aria-pressed="false">💗 Candy hearts</button>
+          <button class="chip" data-top="pearls" aria-pressed="false">⚪ Sugar pearls</button>
+          <button class="chip" data-top="stars" aria-pressed="false">⭐ Gold stars</button>
+          <button class="chip" data-top="none">✖ Clear toppings</button>
+        </div>
+
+        <div class="panel" id="panelFrost" hidden><span class="panel-label">Choose a frosting</span></div>
+
+        <div class="panel" id="panelSize" hidden>
+          <span class="panel-label">Change the cupcake size</span>
+          <button class="chip" data-size="down">➖ Smaller</button>
+          <span class="size-readout" id="sizeReadout">100%</span>
+          <button class="chip" data-size="up">➕ Bigger</button>
+        </div>
+      </div>
+    </section>
+
+    <h2 class="menu-title">Today's Menu</h2>
+    <section class="menu" id="menu"></section>
+  </main>
+
+  <!-- Reusable cupcake drawing -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="cupcake" viewBox="0 0 120 120">
+      <path d="M26 62 H94 L86 108 Q85 112 80 112 H40 Q35 112 34 108 Z" fill="#fff" stroke="#f0a5bc" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M44 66 L46 110 M60 66 V111 M76 66 L74 110" stroke="#f9cddb" stroke-width="3" stroke-linecap="round"/>
+      <path d="M22 64 Q20 46 38 44 Q36 28 54 28 Q60 14 74 26 Q92 26 88 44 Q102 48 98 64 Q60 72 22 64 Z" fill="var(--frost)" stroke="#e58aa6" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M38 52 Q60 60 84 50" stroke="#fff" stroke-opacity="0.65" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <circle cx="62" cy="16" r="7" fill="#d84a73" stroke="#a82f55" stroke-width="2"/>
+      <circle cx="60" cy="14" r="2" fill="#fff" fill-opacity="0.8"/>
+    </symbol>
+  </svg>
+
+  <script>
+    /* ===================== DATA ===================== */
+    const cupcakes = [
+      { name: 'Strawberry Cloud', note: 'Fresh strawberry cream',     price: '$3.50', frost: '#f7b6c9' },
+      { name: 'Vanilla Bean',     note: 'Madagascar vanilla frosting', price: '$3.00', frost: '#fff3e6' },
+      { name: 'Rose Pistachio',   note: 'Rose water and pistachio',    price: '$4.00', frost: '#f3c2dd' },
+      { name: 'Raspberry Velvet', note: 'Red velvet, raspberry swirl', price: '$3.75', frost: '#ec86a6' },
+      { name: 'Salted Caramel',   note: 'Buttery caramel drizzle',     price: '$3.75', frost: '#f6d3b4' },
+      { name: 'Cotton Candy',     note: 'Spun-sugar sweetness',        price: '$3.50', frost: '#ffd0e8' },
+      { name: 'Double Chocolate', note: 'Dark cocoa and fudge icing',  price: '$3.75', frost: '#a8745a' },
+      { name: 'Lemon Meringue',   note: 'Zesty lemon, toasted peaks',  price: '$3.50', frost: '#fff1a8' },
+      { name: 'Blueberry Cheesecake', note: 'Cream cheese and berries', price: '$4.00', frost: '#c9d6ff' },
+      { name: 'Cookies & Cream',  note: 'Crushed cookie crumble',      price: '$3.75', frost: '#e8ddd4' },
+      { name: 'Mint Chip',        note: 'Cool mint, chocolate chips',  price: '$3.50', frost: '#c8f2e0' },
+      { name: 'Lavender Honey',   note: 'Floral and softly sweet',     price: '$4.00', frost: '#e0ccff' },
+      { name: 'Coconut Dream',    note: 'Toasted coconut cream',       price: '$3.50', frost: '#fffaf0' },
+      { name: 'Maple Pecan',      note: 'Maple glaze, crunchy pecans', price: '$4.00', frost: '#e8b98a' },
+      { name: 'Matcha Latte',     note: 'Ceremonial matcha buttercream', price: '$4.25', frost: '#cfe8b0' },
+      { name: 'Pumpkin Spice',    note: 'Warm cinnamon and nutmeg',    price: '$3.75', frost: '#ffcf9e' },
+      { name: 'Mango Sunrise',    note: 'Ripe mango and passion fruit', price: '$4.00', frost: '#ffd27a' },
+      { name: 'Tiramisu',         note: 'Coffee, cocoa, mascarpone',   price: '$4.25', frost: '#e9d3bc' }
+    ];
+    const DEFAULT_FROST = '#f7b6c9';
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const menu = document.getElementById('menu');
+    cupcakes.forEach(c => {
+      const card = document.createElement('article');
+      card.className = 'card';
+      card.tabIndex = 0;
+      card.dataset.search = (c.name + ' ' + c.note).toLowerCase();
+      card.dataset.frost = c.frost;
+      card.dataset.say = `${c.name}: ${c.note}, ${c.price}`;
+      card.innerHTML = `
+        <svg viewBox="0 0 120 120" style="--frost:${c.frost};" aria-hidden="true"><use href="#cupcake"/></svg>
+        <h3>${c.name}</h3>
+        <p>${c.note}</p>
+        <span class="price">${c.price}</span>`;
+      menu.appendChild(card);
+    });
+
+    /* ===================== 1) MODALITY ENGINE (mouse / touch / keyboard / voice) ===================== */
+    const badge = document.getElementById('modalityBadge');
+    let lastTouch = 0;
+    let listening = false;      // recognition engine is running right now
+    let micWanted = false;      // the user switched the mic on (stays true across auto-restarts)
+    let lastMode = { name: 'Mouse (Fine Pointer - Compact Precision Layout)', cls: 'mode-mouse' };
+
+    function setModality(modeName, bodyClass) {
+      document.body.classList.remove('mode-mouse', 'mode-touch', 'mode-keyboard', 'mode-voice');
+      document.body.classList.add(bodyClass);
+      badge.textContent = `Active Modality: ${modeName}`;
+      if (bodyClass !== 'mode-voice') lastMode = { name: modeName, cls: bodyClass };
+    }
+
+    window.addEventListener('touchstart', () => {
+      lastTouch = Date.now();
+      if (micWanted) return;
+      setModality('Touch (Coarse Pointer - Enlarged Touch Targets)', 'mode-touch');
+    }, { passive: true });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && !micWanted) {
+        setModality('Keyboard (High-Contrast Focus Ring Active)', 'mode-keyboard');
+      }
+    });
+
+    /* ===================== 2) SPEECH OUTPUT (the shop talks back) ===================== */
+    const speech = document.getElementById('speech');
+    const heroArt = document.getElementById('heroArt');
+    const voiceToggle = document.getElementById('voiceToggle');
+    const voiceLive = document.getElementById('voiceLive');
+    const voiceLog = document.getElementById('voiceLog');
+    const synth = window.speechSynthesis;
+    let voiceReplies = false;        // Off = replies are text only. On = replies are also spoken.
+    let currentUtt = null;           // the reply being spoken right now
+    let pausedForSpeech = false;     // mic is paused while the shop is talking (so it does not hear itself)
+
+    function updateToggle() {
+      voiceToggle.setAttribute('aria-pressed', String(voiceReplies));
+      voiceToggle.textContent = voiceReplies ? '🔊 Voice replies: On' : '🔈 Voice replies: Off';
+    }
+
+    function setLive(text) { voiceLive.textContent = text; }
+
+    function logLine(who, text) {
+      const d = document.createElement('div');
+      d.className = 'log-line ' + who;
+      d.textContent = (who === 'you' ? 'You: ' : 'Shop: ') + text;
+      voiceLog.appendChild(d);
+      while (voiceLog.children.length > 30) voiceLog.removeChild(voiceLog.firstChild);
+      voiceLog.scrollTop = voiceLog.scrollHeight;
+    }
+
+    function cleanForSpeech(text) {
+      return text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').replace(/&/g, 'and').trim();
+    }
+
+    function speak(text) {
+      if (!voiceReplies || !synth) return;
+      // Pause the mic while we talk, otherwise it would hear the shop's own voice
+      if (listening && recognition) { pausedForSpeech = true; try { recognition.stop(); } catch (e) {} }
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(cleanForSpeech(text));
+      currentUtt = u;
+      u.rate = 1;
+      u.pitch = 1.15;
+      u.onstart = () => {
+        heroArt.classList.add('talking'); speech.classList.add('talking');
+        if (micWanted) setLive('🔊 Shop is replying…');
+      };
+      u.onend = u.onerror = () => {
+        if (u !== currentUtt) return;               // a newer reply took over
+        heroArt.classList.remove('talking'); speech.classList.remove('talking');
+        if (pausedForSpeech) {
+          pausedForSpeech = false;
+          if (micWanted) setTimeout(startRec, 250);     // go back to listening
+        }
+      };
+      synth.speak(u);
+    }
+
+    // say(text)         -> always shows the reply as text in the bubble, and also speaks it
+    //                      when "Voice replies" is On
+    // say(text, false)  -> bubble only, never spoken or logged (quiet hints)
+    function say(text, withVoice = true) {
+      speech.innerHTML = '';
+      const s = document.createElement('span');
+      s.textContent = text;
+      speech.appendChild(s);
+      if (withVoice) {
+        if (micWanted) logLine('shop', text);
+        speak(text);
+      }
+    }
+
+    voiceToggle.addEventListener('click', () => {
+      voiceReplies = !voiceReplies;
+      updateToggle();
+      if (voiceReplies) say('Voice replies are on. Hello, sweet friend!');
+      else {
+        if (synth) synth.cancel();
+        say('Voice replies are off. I will answer in text.');
+      }
+    });
+
+    /* ===================== 3) SPEECH INPUT (talk to the shop) ===================== */
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const micBtn = document.getElementById('micBtn');
+    const input = document.getElementById('searchInput');
+    let recognition = null;
+    let micStarting = false;
+
+    const MIC_BLOCKED = 'Microphone is blocked. Click the lock icon in the address bar, set Microphone to Allow, then tap the mic again.';
+    const FATAL_ERRORS = {
+      'not-allowed': MIC_BLOCKED,
+      'service-not-allowed': MIC_BLOCKED,
+      'audio-capture': 'No microphone was found. Plug one in or check your system sound settings, then tap the mic again.',
+      'network': 'Voice recognition needs an internet connection (Chrome and Edge send your audio to an online service). Check your connection and try again.',
+      'language-not-supported': 'This browser does not support English voice recognition.'
+    };
+
+    function startRec() {
+      if (!recognition || !micWanted || listening) return;
+      try { recognition.start(); } catch (err) { /* already starting */ }
+    }
+
+    function micOffUI() {
+      micBtn.classList.remove('live');
+      micBtn.textContent = '🎤';
+      micBtn.setAttribute('aria-pressed', 'false');
+      micBtn.title = 'Speak your search (M)';
+      setLive('🎤 Mic is off. Tap the mic or press M to start talking.');
+      setModality(lastMode.name, lastMode.cls);       // back to the previous modality
+    }
+
+    function micProblem(msg) {
+      micWanted = false; listening = false; pausedForSpeech = false;
+      micOffUI();
+      setLive('⚠️ ' + msg);
+      say(msg, false);
+      setStatus(msg);
+    }
+
+    if (!SR) {
+      setLive('⚠️ This browser has no voice input. Open the page in Chrome or Edge. Typing still works.');
+    } else {
+      recognition = new SR();
+      recognition.lang = 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = true;      // keep listening so you can say several commands in a row
+
+      recognition.onstart = () => {
+        listening = true;
+        micBtn.classList.add('live');
+        micBtn.textContent = '⏹';
+        micBtn.setAttribute('aria-pressed', 'true');
+        micBtn.title = 'Stop listening (M)';
+        setModality('Voice (Listening... speak now)', 'mode-voice');
+        setLive('🎤 Listening… speak now');
+        setStatus("Listening for voice commands (try 'lemon frosting', 'cherry', 'bigger', 'spin', 'reset')...");
+      };
+
+      recognition.onresult = (event) => {
+        let interim = '', finalText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
+        }
+        if (interim.trim()) {                       // live "what I am hearing"
+          setLive('🎤 Hearing: “' + interim.trim() + '”');
+          input.value = interim.trim();
+        }
+        if (finalText.trim()) {                     // a finished sentence: record it and answer
+          const text = finalText.trim();
+          input.value = text;
+          logLine('you', text);
+          setLive('🎤 Listening… say another command');
+          handleVoiceCommand(text);
+        }
+      };
+
+      recognition.onerror = (e) => {
+        if (FATAL_ERRORS[e.error]) micProblem(FATAL_ERRORS[e.error]);
+        // 'no-speech' and 'aborted' are normal: onend will restart listening
+      };
+
+      recognition.onend = () => {
+        listening = false;
+        if (micWanted && !pausedForSpeech) {
+          setTimeout(startRec, 300);                // Chrome stops after silence, so keep going
+        } else if (!micWanted && micBtn.classList.contains('live')) {
+          micOffUI();
+        }
+      };
+    }
+
+    async function toggleMic() {
+      if (!SR) {
+        setLive('⚠️ This browser has no voice input. Open the page in Chrome or Edge. Typing still works.');
+        say('Voice input needs Chrome or Edge. You can still type your search!', false);
+        return;
+      }
+      if (micStarting) return;
+
+      // Mic is on -> turn it off
+      if (micWanted) {
+        micWanted = false; pausedForSpeech = false;
+        try { recognition.stop(); } catch (err) {}
+        micOffUI();
+        say('Mic stopped. Tap the mic whenever you want to talk again.', false);
+        return;
+      }
+
+      // Mic is off -> turn it on. Ask for permission first so the browser prompt always shows.
+      micStarting = true;
+      if (synth) synth.cancel();
+      setLive('🎤 Starting the microphone…');
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(t => t.stop());
+        } catch (err) {
+          micStarting = false;
+          micProblem(err && err.name === 'NotFoundError' ? FATAL_ERRORS['audio-capture'] : MIC_BLOCKED);
+          return;
+        }
+      }
+      micStarting = false;
+      micWanted = true;
+      say("I'm listening… speak now 🎤", false);
+      startRec();
+    }
+
+    micBtn.addEventListener('click', toggleMic);
+
+    // Keyboard shortcut: press M (outside the text box) to talk
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey && !e.altKey &&
+          !e.target.closest('input, textarea')) {
+        e.preventDefault();
+        toggleMic();
+      }
+    });
+
+    /* ----- Voice commands ----- */
+    const messages = [
+      'Welcome to Sugar & Crumb 🧁',
+      'How may I help you?',
+      'What are we searching today?',
+      'Fresh batch just came out of the oven!',
+      'Strawberry Cloud is our bestseller 🍓',
+      'Need a box for a party? Just ask!',
+      'Take your time, everything is made with love 💗'
+    ];
+    let msgIndex = 0;
+
+    function nextMessage() {
+      msgIndex = (msgIndex + 1) % messages.length;
+      say(messages[msgIndex]);
+    }
+
+    function listMenu() {
+      say('Today we have ' + cupcakes.map(c => c.name).join(', ') + '.');
+    }
+
+    // Every command gets a reply: text always, voice too when "Voice replies" is On.
+    function handleVoiceCommand(raw) {
+      const t = raw.toLowerCase().trim();
+
+      // Customize-your-cupcake commands (colour, toppings, size, spin, reset)
+      if (applyStageCommands(t, raw)) { input.value = ''; return; }
+
+      if (/\b(help|what can (you|i) (do|say))\b/.test(t)) {
+        input.value = '';
+        say('You can say: search strawberry, read the menu, show all, lemon frosting, chocolate base, cherry, sprinkles, bigger, smaller, spin, or reset.');
+        return;
+      }
+      if (/\b(thank you|thanks)\b/.test(t)) { input.value = ''; say("You're welcome! Enjoy your cupcakes 💗"); return; }
+      if (/how are you/.test(t))            { input.value = ''; say("I'm sweet as sugar, thank you! What can I get you today?"); return; }
+
+      if (/(show|clear).*(all|everything)|^(all|clear)$/.test(t)) {
+        input.value = '';
+        runSearch();
+        return;
+      }
+      if (/menu|what do you (have|sell)/.test(t)) {
+        input.value = '';
+        runSearch(false);
+        listMenu();
+        return;
+      }
+      if (/^(next|continue|hello|hi|hey)\b/.test(t) && t.split(' ').length <= 3) {
+        input.value = '';
+        nextMessage();
+        return;
+      }
+
+      // Otherwise treat it as a search ("search strawberry", "I want caramel", "vanilla")
+      const q = t
+        .replace(/^(please\s+)?(search|find|show me|show|i want|i would like|looking for|give me)\s+(for\s+)?/, '')
+        .replace(/\b(cupcakes?|please|a|an|some|the|of)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      input.value = q;
+      runSearch();
+    }
+
+    /* ===================== 4) CLICK = NEXT MESSAGE + SPRINKLE BURST ===================== */
+    const palette = ['#f4a6bd', '#d86a8d', '#ffd0e8', '#ee8fae', '#ffffff', '#f9cddb'];
+    const rand = (a, b) => a + Math.random() * (b - a);
+
+    function burst(x, y) {
+      if (reduceMotion) return;
+      for (let i = 0; i < 12; i++) {
+        const b = document.createElement('div');
+        b.className = 'bit';
+        b.style.left = x + 'px';
+        b.style.top = y + 'px';
+        b.style.background = palette[i % palette.length];
+        const angle = (Math.PI * 2 * i) / 12 + rand(-0.3, 0.3);
+        const dist = rand(40, 90);
+        b.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+        b.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+        b.style.setProperty('--rot', rand(-300, 300) + 'deg');
+        b.addEventListener('animationend', () => b.remove());
+        document.body.appendChild(b);
+      }
+    }
+
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#stage')) return;
+      if (lastMode.cls === 'mode-mouse' || e.detail > 0) burst(e.clientX, e.clientY);
+      if (e.target.closest('input, button')) return;
+      nextMessage();
+    });
+
+    /* ===================== 5) SEARCH ===================== */
+    const btn = document.getElementById('searchBtn');
+    const cards = document.querySelectorAll('.card');
+
+    function runSearch(announce = true) {
+      const q = input.value.trim().toLowerCase();
+      let found = 0;
+      cards.forEach(card => {
+        const match = !q || card.dataset.search.includes(q);
+        card.classList.toggle('hidden', !match);
+        if (match) found++;
+      });
+
+      const old = document.querySelector('.empty');
+      if (old) old.remove();
+
+      if (found === 0) {
+        const msg = document.createElement('p');
+        msg.className = 'empty';
+        msg.textContent = 'Try another flavour: strawberry, chocolate, lemon, mint, mango…';
+        menu.appendChild(msg);
+      }
+      if (!announce) return;
+
+      if (!q) say('Showing the whole menu 🧁');
+      else if (found === 0) say(`Oh no, no cupcakes match "${input.value.trim()}" 🥺`);
+      else say(`Found ${found} sweet ${found === 1 ? 'treat' : 'treats'} for "${input.value.trim()}" 💗`);
+    }
+
+    btn.addEventListener('click', () => runSearch());
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+    input.addEventListener('input', () => runSearch(false));   // live filtering, quiet
+
+    /* ===================== 6) CURSOR INTERACTIONS ===================== */
+    const hero = document.getElementById('heroCupcake');
+    const ring = document.getElementById('cursorRing');
+    const floaters = document.getElementById('floaters');
+
+    // Floating sprinkles for the parallax layer
+    const floaterList = [];
+    for (let i = 0; i < 22; i++) {
+      const f = document.createElement('div');
+      f.className = 'floater';
+      const w = rand(14, 28);
+      f.style.width = w + 'px';
+      f.style.height = '7px';
+      f.style.left = rand(0, 100) + '%';
+      f.style.top = rand(0, 100) + '%';
+      f.style.background = palette[i % palette.length];
+      f.style.border = '1px solid rgba(216,106,141,0.25)';
+      const rot = rand(0, 180);
+      f.dataset.rot = rot;
+      f.dataset.depth = rand(0.3, 1.4);
+      f.style.transform = `rotate(${rot}deg)`;
+      floaters.appendChild(f);
+      floaterList.push(f);
+    }
+
+    // Smooth ring + glow-size loop
+    let mouseX = innerWidth / 2, mouseY = innerHeight / 2;
+    let ringX = mouseX, ringY = mouseY;
+    let speed = 0, glow = 240;
+
+    function loop() {
+      ringX += (mouseX - ringX) * 0.18;
+      ringY += (mouseY - ringY) * 0.18;
+      ring.style.transform = `translate(${ringX}px, ${ringY}px)`;
+
+      // Moving fast makes the pink glow bloom wider; slowing down shrinks it again
+      speed *= 0.9;
+      const target = Math.min(240 + speed * 5, 460);
+      glow += (target - glow) * 0.12;
+      document.body.style.setProperty('--glow', glow + 'px');
+      requestAnimationFrame(loop);
+    }
+    if (!reduceMotion) requestAnimationFrame(loop);
+
+    // Magnetic buttons: they lean toward the cursor when it is close
+    const magnets = document.querySelectorAll('.nav-button, .mic-button');
+    function magnetize(x, y) {
+      magnets.forEach(el => {
+        const r = el.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const dx = x - cx, dy = y - cy;
+        if (Math.hypot(dx, dy) < 110) {
+          el.style.setProperty('--bx', dx * 0.25 + 'px');
+          el.style.setProperty('--by', dy * 0.25 + 'px');
+        } else {
+          el.style.setProperty('--bx', '0px');
+          el.style.setProperty('--by', '0px');
+        }
+      });
+    }
+
+    // Sparkle trail
+    let lastSparkX = 0, lastSparkY = 0;
+    function sparkle(x, y) {
+      const s = document.createElement('div');
+      s.className = 'spark';
+      s.textContent = Math.random() > 0.5 ? '♥' : '✦';
+      s.style.left = x + 'px';
+      s.style.top = y + 'px';
+      s.style.fontSize = rand(10, 20) + 'px';
+      s.style.color = palette[Math.floor(rand(0, 4))];
+      s.style.setProperty('--dx', rand(-24, 24) + 'px');
+      s.addEventListener('animationend', () => s.remove());
+      document.body.appendChild(s);
+    }
+
+    let lastX = 0, lastY = 0;
+    window.addEventListener('mousemove', (e) => {
+      if (Date.now() - lastTouch < 800) return;       // ignore fake mouse events after touch
+      // keep the voice badge while the mic is on; otherwise switch back to mouse mode
+      if (!micWanted && !document.body.classList.contains('mode-mouse')) {
+        setModality('Mouse (Fine Pointer - Compact Precision Layout)', 'mode-mouse');
+      }
+
+      mouseX = e.clientX; mouseY = e.clientY;
+      const x = e.clientX / innerWidth;
+      const y = e.clientY / innerHeight;
+      speed = Math.min(speed + Math.hypot(e.clientX - lastX, e.clientY - lastY), 120);
+      lastX = e.clientX; lastY = e.clientY;
+
+      ring.classList.add('active');
+
+      // 1) Pink glow follows the cursor
+      document.body.style.setProperty('--mx', e.clientX + 'px');
+      document.body.style.setProperty('--my', e.clientY + 'px');
+
+      // 2) Colour theme changes by screen zone
+      document.body.dataset.zone = x < 0.33 ? 'left' : x < 0.66 ? 'middle' : 'right';
+
+      // 3) Hero cupcake leans toward the cursor
+      hero.style.setProperty('--px', ((x - 0.5) * 24) + 'px');
+      hero.style.setProperty('--py', ((y - 0.5) * 18) + 'px');
+      hero.style.setProperty('--rot', ((x - 0.5) * 10) + 'deg');
+
+      // 4) Background sprinkles drift at different depths (parallax)
+      floaterList.forEach(f => {
+        const d = parseFloat(f.dataset.depth);
+        f.style.transform = `translate(${(x - 0.5) * -60 * d}px, ${(y - 0.5) * -60 * d}px) rotate(${f.dataset.rot}deg)`;
+      });
+
+      // 5) Buttons are pulled toward the cursor (magnetic)
+      magnetize(e.clientX, e.clientY);
+
+      // 6) Cursor ring grows over things you can interact with
+      ring.classList.toggle('big', !!e.target.closest('button, input, .card, .stage-cupcake'));
+
+      // 7) Sparkle trail
+      if (!reduceMotion && Math.hypot(e.clientX - lastSparkX, e.clientY - lastSparkY) > 30) {
+        sparkle(e.clientX, e.clientY);
+        lastSparkX = e.clientX; lastSparkY = e.clientY;
+      }
+    });
+
+    window.addEventListener('mousedown', () => ring.classList.add('press'));
+    window.addEventListener('mouseup',   () => ring.classList.remove('press'));
+    document.addEventListener('mouseleave', () => ring.classList.remove('active'));
+
+    // 8) Menu cards: tilt + inner spotlight + hero takes on the hovered flavour's colour
+    cards.forEach(card => {
+      card.addEventListener('mousemove', (e) => {
+        const r = card.getBoundingClientRect();
+        const dx = (e.clientX - r.left) / r.width - 0.5;
+        const dy = (e.clientY - r.top) / r.height - 0.5;
+        card.style.setProperty('--ty', (dx * 10) + 'deg');
+        card.style.setProperty('--tx', (-dy * 10) + 'deg');
+        card.style.setProperty('--cx', ((dx + 0.5) * 100) + '%');
+        card.style.setProperty('--cy', ((dy + 0.5) * 100) + '%');
+      });
+      card.addEventListener('mouseenter', () => {
+        hero.style.setProperty('--frost', card.dataset.frost);
+        say(card.dataset.say, false);               // quiet hint, no speech
+      });
+      card.addEventListener('mouseleave', () => {
+        card.style.setProperty('--ty', '0deg');
+        card.style.setProperty('--tx', '0deg');
+        hero.style.setProperty('--frost', DEFAULT_FROST);
+      });
+      // Keyboard users get the same hero colour + hint on focus
+      card.addEventListener('focus', () => {
+        hero.style.setProperty('--frost', card.dataset.frost);
+        say(card.dataset.say, false);
+      });
+      card.addEventListener('blur', () => hero.style.setProperty('--frost', DEFAULT_FROST));
+    });
+    /* ===================== 7) LAB 1: SPEECH & GESTURE STAGE ===================== */
+    const stage = document.getElementById('stage');
+    const pet = document.getElementById('stageCupcake');
+    const petSvg = document.getElementById('stageSvg');
+    const stageStatus = document.getElementById('stageStatus');
+    const sizeReadout = document.getElementById('sizeReadout');
+
+    /* ----- Data: bases, frostings, toppings ----- */
+    const BASES = [
+      { name: 'Classic White', hex: '#ffffff' },
+      { name: 'Vanilla',       hex: '#fff3d6' },
+      { name: 'Chocolate',     hex: '#a8745a' },
+      { name: 'Red Velvet',    hex: '#d9456b' },
+      { name: 'Lemon',         hex: '#ffe58a' },
+      { name: 'Matcha',        hex: '#cfe8b0' },
+      { name: 'Strawberry',    hex: '#f7b6c9' },
+      { name: 'Blueberry',     hex: '#c9d6ff' },
+      { name: 'Pumpkin',       hex: '#ffcf9e' }
+    ];
+    const FROSTINGS = [
+      { name: 'Lemon',        hex: '#fff1a8' },
+      { name: 'Chocolate',    hex: '#9a6b50' },
+      { name: 'Vanilla',      hex: '#fff0cf' },
+      { name: 'Strawberry',   hex: '#f7b6c9' },
+      { name: 'Caramel',      hex: '#e8b98a' },
+      { name: 'Blueberry',    hex: '#b4c4ff' },
+      { name: 'Raspberry',    hex: '#ec5a7f' },
+      { name: 'Cream Cheese', hex: '#fbf4ee' },
+      { name: 'Mint',         hex: '#c8f2e0' }
+    ];
+    const DEFAULT_BASE = '#ffffff';
+
+    const PET = 120;                    // cupcake box size in px
+    let cx = 0, cy = 0, scale = 1;      // centre position + size
+    let currentBase = DEFAULT_BASE, currentFrost = DEFAULT_FROST;
+    const toppings = { chips: false, sprinkles: false, cherry: false, hearts: false, pearls: false, stars: false };
+    const topEls = {
+      chips: document.getElementById('topChips'),
+      sprinkles: document.getElementById('topSprinkles'),
+      hearts: document.getElementById('topHearts'),
+      pearls: document.getElementById('topPearls'),
+      stars: document.getElementById('topStars'),
+      cherry: document.getElementById('topCherry')
+    };
+
+    /* ----- Draw the chocolate chips and sprinkles onto the frosting ----- */
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    function svgEl(tag, attrs) {
+      const el = document.createElementNS(SVGNS, tag);
+      for (const k in attrs) el.setAttribute(k, attrs[k]);
+      return el;
+    }
+    [[40,50,20],[52,38,-30],[66,44,15],[78,52,-20],[58,56,40],[88,48,10],[46,60,-10],[72,62,30],[34,42,0],[82,40,35]]
+      .forEach(([x, y, a]) => topEls.chips.appendChild(
+        svgEl('ellipse', { cx: x, cy: y, rx: 3.4, ry: 2.4, fill: '#5a3326', transform: `rotate(${a} ${x} ${y})` })));
+    const sprinkleColors = ['#ffffff', '#ff7aa8', '#6ec6ff', '#ffd84d', '#8be28b'];
+    [[36,50,30],[48,38,-40],[60,46,60],[72,40,-20],[84,52,25],[44,60,-60],[66,58,10],[54,30,45],[78,32,-50],[90,46,70],[30,58,-15],[62,64,35]]
+      .forEach(([x, y, a], i) => topEls.sprinkles.appendChild(
+        svgEl('rect', { x: x - 4, y: y - 1.3, width: 8, height: 2.6, rx: 1.3,
+                        fill: sprinkleColors[i % sprinkleColors.length], transform: `rotate(${a} ${x} ${y})` })));
+
+    // Candy hearts
+    const heartColors = ['#e63e78', '#ffffff', '#ff9ab8'];
+    [[38,50,-15],[54,40,10],[70,46,-10],[82,52,15],[60,57,0],[46,59,12],[88,44,-20],[66,34,8]]
+      .forEach(([x, y, a], i) => topEls.hearts.appendChild(
+        svgEl('path', { d: 'M0 3 C-5 -1 -3.5 -4.5 0 -1.8 C3.5 -4.5 5 -1 0 3 Z',
+                        fill: heartColors[i % heartColors.length], stroke: 'rgba(160,40,80,0.35)', 'stroke-width': 0.6,
+                        transform: `translate(${x} ${y}) rotate(${a})` })));
+
+    // Sugar pearls (white and gold)
+    [[36,50],[44,42],[52,36],[60,32],[68,38],[76,44],[84,50],[48,56],[58,52],[68,56],[78,60],[40,58],[90,46],[62,44]]
+      .forEach(([x, y], i) => topEls.pearls.appendChild(
+        svgEl('circle', { cx: x, cy: y, r: 2.1, fill: i % 3 === 0 ? '#f5d98b' : '#ffffff',
+                          stroke: 'rgba(120,80,90,0.35)', 'stroke-width': 0.6 })));
+
+    // Gold stars
+    function starPoints(r) {
+      let pts = [];
+      for (let i = 0; i < 10; i++) {
+        const rad = (i % 2 === 0 ? r : r * 0.45), ang = (-90 + i * 36) * Math.PI / 180;
+        pts.push((Math.cos(ang) * rad).toFixed(2) + ',' + (Math.sin(ang) * rad).toFixed(2));
+      }
+      return pts.join(' ');
+    }
+    const starColors = ['#ffd84d', '#fff4b8', '#ffc233'];
+    [[40,48,0,4.5],[56,38,15,5],[72,44,-10,4.5],[84,52,20,4],[62,56,0,5],[48,58,-15,4],[90,44,10,3.5],[66,32,0,3.5]]
+      .forEach(([x, y, a, r], i) => topEls.stars.appendChild(
+        svgEl('polygon', { points: starPoints(r), fill: starColors[i % starColors.length],
+                           stroke: '#d9a300', 'stroke-width': 0.6, 'stroke-linejoin': 'round',
+                           transform: `translate(${x} ${y}) rotate(${a})` })));
+
+    /* ----- Build the Base and Frosting option buttons ----- */
+    function buildOptions(panelId, list, kind) {
+      const panel = document.getElementById(panelId);
+      list.forEach(o => {
+        const b = document.createElement('button');
+        b.className = 'chip';
+        b.dataset.kind = kind;
+        b.dataset.hex = o.hex;
+        b.dataset.name = o.name;
+        b.setAttribute('aria-pressed', 'false');
+        b.innerHTML = `<i style="--c:${o.hex}"></i>${o.name}`;
+        panel.appendChild(b);
+      });
+    }
+    buildOptions('panelBase', BASES, 'base');
+    buildOptions('panelFrost', FROSTINGS, 'frost');
+
+    /* ----- State helpers ----- */
+    function setStatus(msg) { stageStatus.textContent = msg; }
+
+    function syncButtons() {
+      document.querySelectorAll('.chip[data-kind="base"]').forEach(b =>
+        b.setAttribute('aria-pressed', String(b.dataset.hex === currentBase)));
+      document.querySelectorAll('.chip[data-kind="frost"]').forEach(b =>
+        b.setAttribute('aria-pressed', String(b.dataset.hex === currentFrost)));
+      document.querySelectorAll('.chip[data-top]').forEach(b => {
+        if (b.dataset.top !== 'none') b.setAttribute('aria-pressed', String(!!toppings[b.dataset.top]));
+      });
+      sizeReadout.textContent = Math.round(scale * 100) + '%';
+    }
+    function setBase(hex)  { currentBase = hex;  petSvg.style.setProperty('--base', hex);  syncButtons(); }
+    function setFrost(hex) { currentFrost = hex; petSvg.style.setProperty('--frost', hex); syncButtons(); }
+    function setTopping(key, on) {
+      toppings[key] = on;
+      topEls[key].style.display = on ? '' : 'none';
+      syncButtons();
+    }
+    function clearToppings() { Object.keys(toppings).forEach(k => setTopping(k, false)); }
+
+    function place() { pet.style.transform = `translate(${cx - PET / 2}px, ${cy - PET / 2}px)`; }
+    function bounds() {
+      const half = (PET * scale) / 2;
+      return { minX: half, maxX: stage.clientWidth - half, minY: half, maxY: stage.clientHeight - half };
+    }
+    function clampPet() {
+      const b = bounds();
+      cx = Math.min(Math.max(cx, b.minX), b.maxX);
+      cy = Math.min(Math.max(cy, b.minY), b.maxY);
+      place();
+    }
+    function setScale(v) {
+      scale = Math.min(2.2, Math.max(0.5, v));
+      petSvg.style.setProperty('--s', scale);
+      clampPet();
+      syncButtons();
+    }
+    function spinPet() {
+      petSvg.classList.remove('spin');
+      void petSvg.getBoundingClientRect();      // restart the animation
+      petSvg.classList.add('spin');
+      petSvg.addEventListener('animationend', () => petSvg.classList.remove('spin'), { once: true });
+    }
+    function sprinkle() {                        // sprinkle burst around the cupcake
+      const r = pet.getBoundingClientRect();
+      burst(r.left + r.width / 2, r.top + r.height / 2);
+    }
+
+    let dragging = false, offX = 0, offY = 0, vx = 0, vy = 0;
+    let lastT = 0, lastPX = 0, lastPY = 0, glideId = null;
+
+    function resetPet() {
+      cancelAnimationFrame(glideId);
+      vx = vy = 0; scale = 1;
+      petSvg.style.setProperty('--s', 1);
+      setBase(DEFAULT_BASE);
+      setFrost(DEFAULT_FROST);
+      clearToppings();
+      cx = stage.clientWidth / 2;
+      cy = stage.clientHeight / 2;
+      place();
+      syncButtons();
+    }
+
+    /* ----- Gesture: drag + flick (pointer events = mouse and touch in one) ----- */
+    pet.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      pet.setPointerCapture(e.pointerId);
+      const r = stage.getBoundingClientRect();
+      offX = e.clientX - r.left - cx;
+      offY = e.clientY - r.top - cy;
+      vx = vy = 0;
+      lastT = performance.now(); lastPX = e.clientX; lastPY = e.clientY;
+      cancelAnimationFrame(glideId);
+      pet.classList.add('grabbing');
+      setStatus('Gesture: dragging… let go with a flick to throw it!');
+      e.preventDefault();
+    });
+
+    pet.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const r = stage.getBoundingClientRect();
+      cx = e.clientX - r.left - offX;
+      cy = e.clientY - r.top - offY;
+      clampPet();
+      const now = performance.now();
+      const dt = Math.max(now - lastT, 1);
+      vx = ((e.clientX - lastPX) / dt) * 16;     // pixels per frame
+      vy = ((e.clientY - lastPY) / dt) * 16;
+      lastT = now; lastPX = e.clientX; lastPY = e.clientY;
+    });
+
+    function glide() {
+      const b = bounds();
+      vx *= 0.95; vy *= 0.95;                    // friction
+      cx += vx; cy += vy;
+      if (cx < b.minX || cx > b.maxX) { vx = -vx * 0.7; cx = Math.min(Math.max(cx, b.minX), b.maxX); }
+      if (cy < b.minY || cy > b.maxY) { vy = -vy * 0.7; cy = Math.min(Math.max(cy, b.minY), b.maxY); }
+      place();
+      if (Math.hypot(vx, vy) > 0.3) glideId = requestAnimationFrame(glide);
+    }
+
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      pet.classList.remove('grabbing');
+      if (performance.now() - lastT > 80) vx = vy = 0;   // paused before letting go = no throw
+      if (Math.hypot(vx, vy) > 4) { setStatus('Gesture: flick! Watch it glide.'); glide(); }
+      else setStatus('Gesture: dropped. Try a quick flick next time!');
+    }
+    pet.addEventListener('pointerup', endDrag);
+    pet.addEventListener('pointercancel', endDrag);
+
+    /* ----- Gesture: double-click = sprinkles + spin, wheel = resize ----- */
+    pet.addEventListener('dblclick', () => {
+      sprinkle(); spinPet();
+      setStatus('Gesture: double-click! Sprinkles everywhere.');
+    });
+    pet.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      setScale(scale + (e.deltaY < 0 ? 0.1 : -0.1));
+      setStatus(`Gesture: size ${Math.round(scale * 100)}%`);
+    }, { passive: false });
+
+    /* ----- Keyboard: arrows move, + / - resize, 0 resets ----- */
+    pet.addEventListener('keydown', (e) => {
+      const step = 20;
+      let handled = true;
+      if (e.key === 'ArrowLeft') cx -= step;
+      else if (e.key === 'ArrowRight') cx += step;
+      else if (e.key === 'ArrowUp') cy -= step;
+      else if (e.key === 'ArrowDown') cy += step;
+      else if (e.key === '+' || e.key === '=') setScale(scale + 0.2);
+      else if (e.key === '-') setScale(scale - 0.2);
+      else if (e.key === '0') resetPet();
+      else handled = false;
+      if (handled) { e.preventDefault(); clampPet(); setStatus('Keyboard: cupcake moved.'); }
+    });
+
+    /* ----- Voice: base, frosting, toppings, size, spin, reset ----- */
+    function applyStageCommands(t, raw) {
+      if (/\b(reset|start over)\b/.test(t)) {
+        resetPet();
+        setStatus(`Voice Command Detected: "${raw}" → reset`);
+        say('Cupcake reset ✨');
+        return true;
+      }
+
+      const done = [];
+
+      // Base: "chocolate base", "red velvet sponge"
+      BASES.forEach(b => {
+        if (new RegExp('\\b' + b.name.toLowerCase() + '\\s+(base|sponge)\\b').test(t)) {
+          setBase(b.hex); done.push(b.name + ' base');
+        }
+      });
+
+      // Frosting: "lemon frosting", "cream cheese icing" (plain "lemon" still searches the menu)
+      FROSTINGS.forEach(f => {
+        const word = f.name.toLowerCase();
+        if (new RegExp('\\b' + word + '\\s+(frosting|icing)\\b').test(t)) {
+          setFrost(f.hex); done.push(f.name + ' frosting');
+        }
+      });
+
+      // Toppings
+      if (/\b(no|remove|clear)\s+(all\s+|the\s+)?toppings?\b/.test(t)) { clearToppings(); done.push('toppings cleared'); }
+      if (/\b(cherry|cherries)\b/.test(t))                  { setTopping('cherry', true);    done.push('cherry'); }
+      if (/\b(choco(late)?\s*chips?|chips)\b/.test(t))      { setTopping('chips', true);     done.push('choco chips'); }
+      if (/\b(sprinkles?|confetti)\b/.test(t))              { setTopping('sprinkles', true); sprinkle(); done.push('sprinkles'); }
+      if (/\b(hearts?)\b/.test(t))                          { setTopping('hearts', true);    done.push('candy hearts'); }
+      if (/\b(pearls?)\b/.test(t))                          { setTopping('pearls', true);    done.push('sugar pearls'); }
+      if (/\b(stars?)\b/.test(t))                           { setTopping('stars', true);     done.push('gold stars'); }
+
+      // Size + motion
+      if (/\b(bigger|larger|grow|big)\b/.test(t))    { setScale(scale + 0.3); done.push('bigger'); }
+      if (/\b(smaller|shrink|tiny|small)\b/.test(t)) { setScale(scale - 0.3); done.push('smaller'); }
+      if (/\b(spin|twirl|dance)\b/.test(t))          { spinPet(); done.push('spin'); }
+
+      if (!done.length) return false;
+      setStatus(`Voice Command Detected: "${raw}" → ${done.join(', ')}`);
+      say(`Done! ${done.join(', ')} 🧁`);
+      return true;
+    }
+
+    /* ----- Buttons (mouse / touch / keyboard) ----- */
+    const toolButtons = document.querySelectorAll('.tool[data-panel]');
+    function togglePanel(btn) {
+      const willOpen = btn.getAttribute('aria-expanded') !== 'true';
+      toolButtons.forEach(t => {
+        t.setAttribute('aria-expanded', 'false');
+        document.getElementById(t.dataset.panel).hidden = true;
+      });
+      if (willOpen) {
+        btn.setAttribute('aria-expanded', 'true');
+        document.getElementById(btn.dataset.panel).hidden = false;
+      }
+    }
+
+    document.getElementById('controls').addEventListener('click', (e) => {
+      const tool = e.target.closest('.tool');
+      if (tool) {
+        if (tool.dataset.panel) { togglePanel(tool); return; }
+        if (tool.dataset.act === 'spin')  { spinPet();  setStatus('Button: spin!'); }
+        if (tool.dataset.act === 'reset') { resetPet(); setStatus('Button: reset.'); }
+        return;
+      }
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+
+      if (chip.dataset.kind === 'base') {
+        setBase(chip.dataset.hex);  setStatus(`Button: ${chip.dataset.name} base.`);
+      } else if (chip.dataset.kind === 'frost') {
+        setFrost(chip.dataset.hex); setStatus(`Button: ${chip.dataset.name} frosting.`);
+      } else if (chip.dataset.top === 'none') {
+        clearToppings();            setStatus('Button: toppings cleared.');
+      } else if (chip.dataset.top) {
+        const key = chip.dataset.top;
+        setTopping(key, !toppings[key]);
+        setStatus(`Button: ${chip.textContent.replace(/^\S+\s/, '')} ${toppings[key] ? 'added' : 'removed'}.`);
+      } else if (chip.dataset.size === 'up') {
+        setScale(scale + 0.2);      setStatus(`Button: bigger (${Math.round(scale * 100)}%).`);
+      } else if (chip.dataset.size === 'down') {
+        setScale(scale - 0.2);      setStatus(`Button: smaller (${Math.round(scale * 100)}%).`);
+      }
+    });
+
+    window.addEventListener('resize', clampPet);
+    resetPet();
+  </script>
+</body>
+</html>
